@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>教师投票系统</title>
   <style>
+    /* 保持原样式不变 */
     * {
       box-sizing: border-box;
       margin: 0;
@@ -63,24 +64,6 @@
       background-color: #f1f8ff;
     }
     
-    .progress-container {
-      width: 60%;
-      display: inline-block;
-      margin-right: 10px;
-      background-color: #ecf0f1;
-      border-radius: 10px;
-      overflow: hidden;
-      height: 20px;
-      vertical-align: middle;
-    }
-    
-    .progress-bar {
-      height: 100%;
-      background-color: #2ecc71;
-      border-radius: 10px;
-      transition: width 0.3s ease;
-    }
-    
     .vote-btn {
       background-color: #3498db;
       color: white;
@@ -96,8 +79,9 @@
       background-color: #2980b9;
     }
     
-    .vote-btn:active {
-      transform: scale(0.98);
+    .vote-btn:disabled {
+      background-color: #95a5a6;
+      cursor: not-allowed;
     }
     
     .vote-count {
@@ -117,22 +101,16 @@
       color: #2c3e50;
     }
     
-    @media (max-width: 600px) {
-      .container {
-        padding: 15px;
-      }
-      
-      .vote-table {
-        font-size: 14px;
-      }
-      
-      .vote-table th, .vote-table td {
-        padding: 10px 8px;
-      }
-      
-      .progress-container {
-        width: 50%;
-      }
+    .loading {
+      text-align: center;
+      padding: 20px;
+      color: #7f8c8d;
+    }
+    
+    .error {
+      color: #e74c3c;
+      text-align: center;
+      padding: 20px;
     }
   </style>
 </head>
@@ -149,117 +127,159 @@
           <th>操作</th>
         </tr>
       </thead>
-      <tbody>
-        <!-- 使用JavaScript动态生成教师列表 -->
-        <tr>
-          <td>1</td>
-          <td class="teacher-name">张老师</td>
-          <td>
-            <div class="progress-container">
-              <div class="progress-bar" style="width: 45%"></div>
-            </div>
-            <span class="vote-count">45 票</span>
-          </td>
-          <td>
-            <button class="vote-btn" data-id="1">投票</button>
-          </td>
-        </tr>
-        <tr>
-          <td>2</td>
-          <td class="teacher-name">李老师</td>
-          <td>
-            <div class="progress-container">
-              <div class="progress-bar" style="width: 30%"></div>
-            </div>
-            <span class="vote-count">30 票</span>
-          </td>
-          <td>
-            <button class="vote-btn" data-id="2">投票</button>
-          </td>
-        </tr>
-        <tr>
-          <td>3</td>
-          <td class="teacher-name">王老师</td>
-          <td>
-            <div class="progress-container">
-              <div class="progress-bar" style="width: 60%"></div>
-            </div>
-            <span class="vote-count">60 票</span>
-          </td>
-          <td>
-            <button class="vote-btn" data-id="3">投票</button>
-          </td>
-        </tr>
-        <tr>
-          <td>4</td>
-          <td class="teacher-name">赵老师</td>
-          <td>
-            <div class="progress-container">
-              <div class="progress-bar" style="width: 25%"></div>
-            </div>
-            <span class="vote-count">25 票</span>
-          </td>
-          <td>
-            <button class="vote-btn" data-id="4">投票</button>
-          </td>
-        </tr>
+      <tbody id="teachers-container">
+        <tr><td colspan="4" class="loading">加载中...</td></tr>
       </tbody>
     </table>
     
     <div class="total-votes">
-      总投票数: <span id="total-votes">160</span> 票
+      总投票数：<span id="total-votes">0</span> 票
     </div>
   </div>
 
   <script>
-    document.addEventListener('DOMContentLoaded', function() {
-      const voteButtons = document.querySelectorAll('.vote-btn');
-      const totalVotesElement = document.getElementById('total-votes');
-      
-      // 模拟投票数据
-      let votes = [45, 30, 60, 25];
-      let totalVotes = votes.reduce((sum, vote) => sum + vote, 0);
-      
-      // 初始化总票数显示
-      totalVotesElement.textContent = totalVotes;
-      
-      // 添加投票功能
-      voteButtons.forEach(button => {
-        button.addEventListener('click', function() {
-          const teacherId = parseInt(this.getAttribute('data-id')) - 1;
-          
-          // 增加票数
-          votes[teacherId]++;
-          totalVotes++;
-          
-          // 更新显示
-          updateVoteDisplay(teacherId);
-          totalVotesElement.textContent = totalVotes;
-          
-          // 显示投票成功提示
-          showVoteSuccess(teacherId);
-        });
+    // 生成用户唯一标识
+    function generateUserToken() {
+      return 'user_' + Math.random().toString(36).substring(2, 15) + 
+             Math.random().toString(36).substring(2, 15);
+    }
+
+    // 获取或生成用户标识
+    let userToken = localStorage.getItem('userToken');
+    if (!userToken) {
+      userToken = generateUserToken();
+      localStorage.setItem('userToken', userToken);
+    }
+
+    // 全局数据存储
+    let appData = {
+      teachers: [],
+      totalVotes: 0
+    };
+
+    // 客户端已投票记录
+    let votedTeachers = JSON.parse(localStorage.getItem('votedTeachers') || '{}');
+
+    // 渲染教师表格
+    function renderTeachers() {
+      const container = document.getElementById('teachers-container');
+      const { teachers } = appData;
+
+      if (teachers.length === 0) {
+        container.innerHTML = '<tr><td colspan="4" class="error">暂无教师数据</td></tr>';
+        return;
+      }
+
+      let html = '';
+      teachers.forEach(teacher => {
+        const isVoted = votedTeachers[teacher.id] === true;
+        html += `
+          <tr data-id="${teacher.id}">
+            <td>${teacher.id}</td>
+            <td class="teacher-name">${teacher.name}</td>
+            <td><span class="vote-count">${teacher.votes} 票</span></td>
+            <td>
+              <button 
+                class="vote-btn" 
+                data-id="${teacher.id}" 
+                ${isVoted ? 'disabled' : ''}
+              >
+                ${isVoted ? '已投票' : '投票'}
+              </button>
+            </td>
+          </tr>
+        `;
       });
-      
-      // 更新投票显示
-      function updateVoteDisplay(teacherId) {
-        const row = document.querySelectorAll('tbody tr')[teacherId];
-        const progressBar = row.querySelector('.progress-bar');
-        const voteCount = row.querySelector('.vote-count');
-        
-        // 计算百分比（最大宽度为100%）
-        const percentage = Math.min((votes[teacherId] / totalVotes) * 100, 100);
-        
-        // 更新进度条和票数显示
-        progressBar.style.width = `${percentage}%`;
-        voteCount.textContent = `${votes[teacherId]} 票`;
+      container.innerHTML = html;
+    }
+
+    // 更新总票数
+    function updateTotalVotes() {
+      document.getElementById('total-votes').textContent = appData.totalVotes;
+    }
+
+    // 获取初始数据
+    function fetchInitialData() {
+      fetch('/api/data')
+        .then(response => response.ok ? response.json() : Promise.reject())
+        .then(data => {
+          if (data.success) {
+            appData.teachers = data.teachers;
+            appData.totalVotes = data.totalVotes;
+            renderTeachers();
+            updateTotalVotes();
+          }
+        })
+        .catch(() => {
+          document.getElementById('teachers-container').innerHTML = 
+            '<tr><td colspan="4" class="error">数据加载失败，请刷新重试</td></tr>';
+        });
+    }
+
+    // 处理投票
+    function handleVote(teacherId) {
+      if (votedTeachers[teacherId]) {
+        alert('您已对该教师投过票~');
+        return;
       }
-      
-      // 显示投票成功提示
-      function showVoteSuccess(teacherId) {
-        const teacherName = document.querySelectorAll('.teacher-name')[teacherId].textContent;
-        alert(`您已成功为${teacherName}投票！`);
-      }
+
+      fetch('/vote', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: `teacherId=${teacherId}&userToken=${userToken}`,
+      })
+      .then(response => response.ok ? response.json() : Promise.reject())
+      .then(data => {
+        if (data.success) {
+          votedTeachers[teacherId] = true;
+          localStorage.setItem('votedTeachers', JSON.stringify(votedTeachers));
+          
+          appData.teachers = data.teachers;
+          appData.totalVotes = data.totalVotes;
+          renderTeachers();
+          updateTotalVotes();
+          alert('投票成功！');
+        } else {
+          alert(data.message || '投票失败');
+        }
+      })
+      .catch(() => {
+        alert('网络异常，投票失败');
+      });
+    }
+
+    // 页面加载初始化：先检测服务器是否重启
+    document.addEventListener('DOMContentLoaded', () => {
+      // 1. 先请求服务器启动时间，判断是否重启
+      fetch('/api/server-info')
+        .then(response => response.json())
+        .then(serverInfo => {
+          const lastServerStartTime = localStorage.getItem('lastServerStartTime');
+          const currentServerTime = serverInfo.serverStartTime.toString();
+
+          // 若服务器启动时间变化（说明重启过），则清除本地投票记录
+          if (lastServerStartTime !== currentServerTime) {
+            console.log('检测到服务器重启，重置投票状态');
+            localStorage.removeItem('votedTeachers'); // 清除已投票记录
+            votedTeachers = {}; // 重置内存记录
+            localStorage.setItem('lastServerStartTime', currentServerTime); // 更新本地记录的服务器启动时间
+          }
+
+          // 2. 加载教师数据
+          fetchInitialData();
+        })
+        .catch(err => {
+          console.error('获取服务器信息失败：', err);
+          fetchInitialData(); // 即使失败也继续加载数据
+        });
+
+      // 3. 绑定投票事件
+      document.querySelector('.vote-table').addEventListener('click', (e) => {
+        if (e.target.classList.contains('vote-btn') && !e.target.disabled) {
+          const teacherId = parseInt(e.target.getAttribute('data-id'));
+          handleVote(teacherId);
+        }
+      });
     });
   </script>
 </body>
