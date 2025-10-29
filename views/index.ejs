@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>教师投票系统</title>
   <style>
-    /* 保持原样式不变 */
     * {
       box-sizing: border-box;
       margin: 0;
@@ -117,6 +116,7 @@
 <body>
   <div class="container">
     <h1>教师投票系统</h1>
+    <p style="text-align:center; color:#7f8c8d; margin-bottom:20px">每个用户只能投一张票</p>
     
     <table class="vote-table">
       <thead>
@@ -138,7 +138,7 @@
   </div>
 
   <script>
-    // 生成用户唯一标识
+    // 生成用户唯一标识  用以防止刷票
     function generateUserToken() {
       return 'user_' + Math.random().toString(36).substring(2, 15) + 
              Math.random().toString(36).substring(2, 15);
@@ -157,8 +157,9 @@
       totalVotes: 0
     };
 
-    // 客户端已投票记录
-    let votedTeachers = JSON.parse(localStorage.getItem('votedTeachers') || '{}');
+    //记录用户投票的具体教师ID（初始为null，未投票）
+    let votedTeacherId = localStorage.getItem('votedTeacherId') || null;
+    if (votedTeacherId) votedTeacherId = parseInt(votedTeacherId);
 
     // 渲染教师表格
     function renderTeachers() {
@@ -172,7 +173,9 @@
 
       let html = '';
       teachers.forEach(teacher => {
-        const isVoted = votedTeachers[teacher.id] === true;
+        const hasVoted = votedTeacherId !== null;
+        const isVotedTeacher = teacher.id === votedTeacherId;
+
         html += `
           <tr data-id="${teacher.id}">
             <td>${teacher.id}</td>
@@ -182,9 +185,12 @@
               <button 
                 class="vote-btn" 
                 data-id="${teacher.id}" 
-                ${isVoted ? 'disabled' : ''}
+                ${hasVoted ? 'disabled' : ''}
               >
-                ${isVoted ? '已投票' : '投票'}
+                ${hasVoted 
+                  ? (isVotedTeacher ? '已投票' : '无法投票')  // 已投票时：目标显示“已投票”，其他显示“无法投票”
+                  : '投票'  // 未投票时显示“投票”
+                }
               </button>
             </td>
           </tr>
@@ -216,13 +222,14 @@
         });
     }
 
-    // 处理投票
+    // 处理投票：记录具体投票的教师ID
     function handleVote(teacherId) {
-      if (votedTeachers[teacherId]) {
-        alert('您已对该教师投过票~');
+      if (votedTeacherId !== null) {
+        alert('您已投过票，每个用户只能投一次哦~');
         return;
       }
 
+      // 发送投票请求
       fetch('/vote', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -231,9 +238,10 @@
       .then(response => response.ok ? response.json() : Promise.reject())
       .then(data => {
         if (data.success) {
-          votedTeachers[teacherId] = true;
-          localStorage.setItem('votedTeachers', JSON.stringify(votedTeachers));
-          
+          votedTeacherId = parseInt(teacherId);
+          localStorage.setItem('votedTeacherId', votedTeacherId);
+
+          // 更新页面数据
           appData.teachers = data.teachers;
           appData.totalVotes = data.totalVotes;
           renderTeachers();
@@ -248,32 +256,30 @@
       });
     }
 
-    // 页面加载初始化：先检测服务器是否重启
+    // 页面加载初始化：检测服务器重启，重置投票状态
     document.addEventListener('DOMContentLoaded', () => {
-      // 1. 先请求服务器启动时间，判断是否重启
       fetch('/api/server-info')
         .then(response => response.json())
         .then(serverInfo => {
           const lastServerStartTime = localStorage.getItem('lastServerStartTime');
           const currentServerTime = serverInfo.serverStartTime.toString();
 
-          // 若服务器启动时间变化（说明重启过），则清除本地投票记录
+          // 服务器重启后，重置投票状态
           if (lastServerStartTime !== currentServerTime) {
             console.log('检测到服务器重启，重置投票状态');
-            localStorage.removeItem('votedTeachers'); // 清除已投票记录
-            votedTeachers = {}; // 重置内存记录
-            localStorage.setItem('lastServerStartTime', currentServerTime); // 更新本地记录的服务器启动时间
+            localStorage.removeItem('votedTeacherId'); // 清除已投票的教师ID
+            votedTeacherId = null; // 重置内存状态
+            localStorage.setItem('lastServerStartTime', currentServerTime);
           }
 
-          // 2. 加载教师数据
           fetchInitialData();
         })
         .catch(err => {
           console.error('获取服务器信息失败：', err);
-          fetchInitialData(); // 即使失败也继续加载数据
+          fetchInitialData();
         });
 
-      // 3. 绑定投票事件
+      // 绑定投票事件
       document.querySelector('.vote-table').addEventListener('click', (e) => {
         if (e.target.classList.contains('vote-btn') && !e.target.disabled) {
           const teacherId = parseInt(e.target.getAttribute('data-id'));

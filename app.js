@@ -1,38 +1,31 @@
-﻿const express = require('express');
+﻿//import
+const express = require('express');
 const bodyParser = require('body-parser');
 const path = require('path');
 const sqlite3 = require('sqlite3').verbose();
 
-const app = express();
-const port = 3000;
+const app = express(); //启动EJS框架
+const port = 3000; //服务器端口
 
-// 配置EJS模板
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
+app.use(bodyParser.urlencoded({ extended: false }));  //解析表单数据
 
-// 解析POST表单数据
-app.use(bodyParser.urlencoded({ extended: false }));
 
-// 服务器内存存储：记录已投票的用户标识+教师ID
-const votedRecords = new Map();
-// 获取服务器启动时间以刷新投票资格
-const serverStartTime = new Date().getTime(); // 毫秒级时间戳
+const votedUsers = new Set();//记录已投过票的用户标识（userToken），全局唯一  防止刷票
+const serverStartTime = new Date().getTime(); // 服务器启动时间
 
-// 数据库路径
-const dbPath = path.join(__dirname, 'db', 'vote.db');
-
-// 连接数据库并初始化
+const dbPath = path.join(__dirname, 'db', 'vote.db');  // 链接数据库
 const db = new sqlite3.Database(dbPath, (err) => {
-  if (err) {
-    console.error('数据库连接失败：', err.message);
-  } else {
+  if (err) console.error('数据库连接失败：', err.message);
+  else {
     console.log('数据库连接成功');
     initTeachersTable();
   }
 });
 
-// 初始化教师表
 function initTeachersTable() {
+  //若无表，创建表
   db.run(`
     CREATE TABLE IF NOT EXISTS teachers (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -46,12 +39,12 @@ function initTeachersTable() {
     }
     console.log('teachers表已就绪');
 
-    // 插入初始教师数据（如果表为空）
     db.get("SELECT COUNT(*) AS count FROM teachers", (err, row) => {
       if (err) {
         console.error('查询教师数据失败：', err.message);
         return;
       }
+      //循环插入教师
       if (row.count === 0) {
         const insertSql = "INSERT INTO teachers (name, votes) VALUES (?, ?)";
         const teachers = ['郭克华', '李亚', '刘璇'];
@@ -66,12 +59,11 @@ function initTeachersTable() {
   });
 }
 
-// 新增：获取服务器启动时间（用于前端检测重启）
+// 获取服务器信息接口用来检测重启
 app.get('/api/server-info', (req, res) => {
   res.json({ serverStartTime: serverStartTime });
 });
 
-// 首页路由
 app.get('/', (req, res) => {
   res.render('index');
 });
@@ -79,15 +71,13 @@ app.get('/', (req, res) => {
 // 数据接口
 app.get('/api/data', (req, res) => {
   db.all("SELECT id, name, votes FROM teachers ORDER BY id", [], (err, teachers) => {
-    if (err) {
-      return res.json({ success: false, message: '查询数据失败' });
-    }
+    if (err) return res.json({ success: false, message: '查询数据失败' });
     const totalVotes = teachers.reduce((sum, t) => sum + t.votes, 0);
     res.json({ success: true, teachers, totalVotes });
   });
 });
 
-// 投票接口
+// 投票接口：每个用户只能投一次
 app.post('/vote', (req, res) => {
   const { teacherId, userToken } = req.body;
 
@@ -95,29 +85,24 @@ app.post('/vote', (req, res) => {
     return res.json({ success: false, message: '参数不完整' });
   }
 
-  const recordKey = `${userToken}_${teacherId}`;
-
-  if (votedRecords.has(recordKey)) {
-    return res.json({ success: false, message: '您已对该教师投过票，不能重复投票哦~' });
+  // 检查用户是否已投过票（全局唯一）
+  if (votedUsers.has(userToken)) {
+    return res.json({ success: false, message: '您已投过票，只能投一次哦~' });
   }
 
+  // 更新教师票数
   db.run(
     "UPDATE teachers SET votes = votes + 1 WHERE id = ?",
     [teacherId],
     function(err) {
-      if (err) {
-        return res.json({ success: false, message: '投票失败：' + err.message });
-      }
-      if (this.changes === 0) {
-        return res.json({ success: false, message: '未找到该教师' });
-      }
+      if (err) return res.json({ success: false, message: '投票失败：' + err.message });
+      if (this.changes === 0) return res.json({ success: false, message: '未找到该教师' });
 
-      votedRecords.set(recordKey, true);
+      // 记录用户已投票
+      votedUsers.add(userToken);
 
       db.all("SELECT id, name, votes FROM teachers ORDER BY id", [], (err, teachers) => {
-        if (err) {
-          return res.json({ success: false, message: '查询更新后的数据失败' });
-        }
+        if (err) return res.json({ success: false, message: '查询更新后的数据失败' });
         const totalVotes = teachers.reduce((sum, t) => sum + t.votes, 0);
         res.json({ success: true, teachers, totalVotes });
       });
@@ -125,8 +110,6 @@ app.post('/vote', (req, res) => {
   );
 });
 
-// 启动服务器
 app.listen(port, () => {
   console.log(`服务器运行中：http://localhost:${port}`);
-  console.log(`服务器启动时间：${new Date(serverStartTime).toLocaleString()}`);
 });
